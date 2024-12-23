@@ -1,0 +1,8 @@
+[package]
+name = "replicating-tmux"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+termion = "*"
+portable-pty = "0.8.1"
