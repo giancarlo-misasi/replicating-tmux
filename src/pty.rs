@@ -2,18 +2,11 @@ use libc::{self, ioctl, winsize, TIOCSWINSZ};
 use std::{
     cell::Cell,
     io::{ErrorKind, Read, Write},
-    os::fd::AsRawFd, thread, time::Duration,
+    os::fd::AsRawFd,
 };
 use std::{io, os::unix::process::CommandExt};
 
 use crate::fd::FileDescriptor;
-
-pub struct PtySize {
-    pub rows: u16,
-    pub cols: u16,
-    pub pixel_width: u16,
-    pub pixel_height: u16,
-}
 
 pub struct Pty {
     controller: PtyController,
@@ -27,6 +20,13 @@ struct PtyController {
 
 struct PtyWorker {
     fd: FileDescriptor,
+}
+
+struct PtySize {
+    rows: u16,
+    cols: u16,
+    pixel_width: u16,
+    pixel_height: u16,
 }
 
 impl Pty {
@@ -80,8 +80,13 @@ impl Pty {
         self.controller.take_writer()
     }
 
-    pub fn resize(&self, size: PtySize) -> io::Result<()> {
-        self.controller.resize(size)
+    pub fn resize(&self, rows: u16, cols: u16) -> io::Result<()> {
+        self.controller.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
     }
 }
 

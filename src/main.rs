@@ -1,11 +1,18 @@
 extern crate termion;
 
-pub mod pty;
 pub mod fd;
+pub mod pty;
 
-use std::{process::exit, sync::{mpsc::{channel, Sender}, Arc, Mutex}, thread};
+use pty::Pty;
 use std::io::{self, stdin, stdout, Read, Write};
-use pty::{Pty, PtySize};
+use std::{
+    process::exit,
+    sync::{
+        mpsc::{channel, Sender},
+        Arc, Mutex,
+    },
+    thread,
+};
 use termion::{raw::IntoRawMode, terminal_size};
 
 #[derive(Clone)]
@@ -104,16 +111,17 @@ fn main() {
     pass_input_to_shell(writer.clone());
 
     let mut stdout = stdout().into_raw_mode().unwrap();
-    write!(stdout, "{}{}", termion::clear::All, termion::cursor::Goto(1, 1)).unwrap();
+    write!(
+        stdout,
+        "{}{}",
+        termion::clear::All,
+        termion::cursor::Goto(1, 1)
+    )
+    .unwrap();
 
     // capture initial terminal size to check for changes
     let (mut cols, mut rows) = terminal_size().unwrap();
-    pty.resize(PtySize {
-        rows,
-        cols,
-        pixel_width: 0,
-        pixel_height: 0,
-    }).unwrap();
+    pty.resize(rows, cols).unwrap();
 
     // start output loop
     loop {
@@ -128,12 +136,7 @@ fn main() {
         if c != cols || r != rows {
             rows = r;
             cols = c;
-            pty.resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            }).unwrap();
+            pty.resize(rows, cols).unwrap();
         }
     }
 }
