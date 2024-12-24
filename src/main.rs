@@ -1,8 +1,11 @@
 extern crate termion;
 
+pub mod pty;
+pub mod fd;
+
 use std::{process::exit, sync::{mpsc::{channel, Sender}, Arc, Mutex}, thread};
 use std::io::{self, stdin, stdout, Read, Write};
-use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem, MasterPty};
+use pty::{Pty, PtySize};
 use termion::{raw::IntoRawMode, terminal_size};
 
 #[derive(Clone)]
@@ -45,36 +48,6 @@ impl ReaderWrapper {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut reader = self.reader.lock().unwrap();
         reader.read(buf)
-    }
-}
-
-pub struct ZshPair {
-    pub parent: Box<dyn MasterPty + Send>,
-    pub child: Box<dyn Child + Send>,
-}
-
-fn spawn_zsh() -> ZshPair {
-    let pty_system = NativePtySystem::default();
-
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .unwrap();
-
-    let cmd = CommandBuilder::new("zsh");
-    let child = pair.slave.spawn_command(cmd).unwrap();
-
-    // Release any handles owned by the slave: we don't need it now
-    // that we've spawned the child.
-    drop(pair.slave);
-
-    ZshPair {
-        parent: pair.master,
-        child,
     }
 }
 
@@ -121,9 +94,10 @@ fn main() {
     println!("start");
 
     // setup
-    let pair = spawn_zsh();
-    let reader = ReaderWrapper::new(pair.parent.try_clone_reader().unwrap());
-    let writer = WriterWrapper::new(pair.parent.take_writer().unwrap());
+    let cmd = std::process::Command::new("zsh");
+    let pty = Pty::open(cmd).unwrap();
+    let reader = ReaderWrapper::new(pty.try_clone_reader().unwrap());
+    let writer = WriterWrapper::new(pty.take_writer().unwrap());
     let (tx, rx) = channel();
 
     read_from_shell(reader.clone(), tx.clone());
@@ -134,6 +108,12 @@ fn main() {
 
     // capture initial terminal size to check for changes
     let (mut cols, mut rows) = terminal_size().unwrap();
+    pty.resize(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }).unwrap();
 
     // start output loop
     loop {
@@ -146,33 +126,14 @@ fn main() {
         // check if we need a resize
         let (c, r) = terminal_size().unwrap();
         if c != cols || r != rows {
-            cols = c;
             rows = r;
-            let _ = pair.parent.resize(PtySize {
+            cols = c;
+            pty.resize(PtySize {
                 rows,
                 cols,
                 pixel_width: 0,
                 pixel_height: 0,
-            });
+            }).unwrap();
         }
     }
-
-    // try and wait for the child to complete
-    if let Some(status) = pair.child.try_wait().unwrap() {
-        println!("child status: {status}")
-    } else {
-        println!("killing child process because it took to long");
-        pair.child.kill().unwrap(); // force kill it
-    }
-
-    // Take care to drop the master after our processes are
-    // done, as some platforms get unhappy if it is dropped
-    // sooner than that.
-    drop(pair.parent);
-
-    // let output = rx.recv().unwrap();
-    // print!("output: ");
-    // for c in output.escape_debug() {
-    //     print!("{}", c);
-    // }
 }
