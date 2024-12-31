@@ -3,6 +3,7 @@ use std::{
     cell::Cell,
     io::{ErrorKind, Read, Write},
     os::fd::AsRawFd,
+    sync::{Arc, Mutex},
 };
 use std::{io, os::unix::process::CommandExt};
 
@@ -10,7 +11,7 @@ use crate::fd::FileDescriptor;
 
 pub struct Pty {
     controller: PtyController,
-    child: std::process::Child,
+    child: Arc<Mutex<std::process::Child>>,
 }
 
 struct PtyController {
@@ -68,7 +69,7 @@ impl Pty {
 
         Ok(Pty {
             controller: PtyController::new(FileDescriptor::new(controller_fd)),
-            child,
+            child: Arc::new(Mutex::new(child)),
         })
     }
 
@@ -88,11 +89,19 @@ impl Pty {
             pixel_height: 0,
         })
     }
+
+    pub fn stopped(&self) -> io::Result<bool> {
+        self.child
+            .lock()
+            .unwrap()
+            .try_wait()
+            .map(|opt| opt.is_some())
+    }
 }
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        let _ = self.child.lock().unwrap().kill();
         // controller fd will drop itself
     }
 }
